@@ -12,7 +12,7 @@ from collections import defaultdict
 
 # --- 設定項目 ---
 # 実行環境の環境変数からスプレッドシートキーを取得するか、直接ここに記述してください
-SPREADSHEET_KEY = os.environ.get('SPREADSHEET_KEY', 'YOUR_SPREADSHEET_KEY')
+SPREADSHEET_KEY = '1NBYKIW94P14fBgTSwlHBwOfuh-S3EYhsLNnALuWFdbQ'
 
 # HTML解析に基づき更新されたCSSセレクタ
 SELECTORS = {
