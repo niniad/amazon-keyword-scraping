@@ -1,7 +1,7 @@
-# main.py (import文を修正した最終版)
+# main.py (import文を修正した最終完成版)
 import gspread
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth.stealth import stealth_sync # ★★★ ここを修正しました ★★★
+from playwright_stealth import stealth_sync # ★★★ ここを修正しました ★★★
 from bs4 import BeautifulSoup
 from datetime import datetime
 import time
@@ -142,8 +142,9 @@ def main():
             
             rank_results = get_amazon_rankings_for_keyword(page, keyword, asins_to_find)
 
+            # キーワードごとに結果をまとめて書き込む
+            rows_to_append = []
             for asin in asins_to_find:
-                # keywordに紐づくASINだけを書き込むように修正
                 if asin not in rank_results: continue
                 rank_data = rank_results[asin]
                 new_row = [
@@ -153,8 +154,12 @@ def main():
                     '',
                     datetime.now().strftime('%Y/%m/%d %H:%M:%S')
                 ]
-                results_sheet.append_row(new_row, value_input_option='USER_ENTERED')
-                print(f"書き込み完了: {new_row}")
+                rows_to_append.append(new_row)
+                print(f"結果を準備: {new_row}")
+
+            if rows_to_append:
+                results_sheet.append_rows(rows_to_append, value_input_option='USER_ENTERED')
+                print(f"'{keyword}' の結果 {len(rows_to_append)} 件をまとめて書き込みました。")
             
             time.sleep(random.uniform(7, 12))
 
