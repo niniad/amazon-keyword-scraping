@@ -1,10 +1,10 @@
-# .github/workflows/scrape.yml (原因調査コードを追加した最終版)
+# .github/workflows/scrape.yml (クリーン版)
 name: Amazon Rank Scraper
 
 on:
   schedule:
     - cron: '0 * * * *' # 毎時0分に実行
-  workflow_dispatch: # 手動でも実行できるようにする
+  workflow_dispatch:
 
 jobs:
   scrape:
@@ -18,31 +18,13 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ★★★ ここに調査コードを追加しました ★★★
-      - name: ライブラリのインストールと環境調査
+      - name: PythonライブラリとPlaywrightブラウザのインストール
         run: |
-          # ステップ1: クリーンなインストールを試みる
           python -m pip install --upgrade pip
           pip install --no-cache-dir --upgrade gspread beautifulsoup4 pandas playwright playwright-stealth
           python -m playwright install --with-deps
-          
-          echo "=================================================="
-          echo "          インストール済みライブラリ一覧"
-          echo "=================================================="
-          # ステップ2: 実際にインストールされた全ライブラリのバージョンを確認する
-          pip freeze
-          
-          echo "=================================================="
-          echo "     playwright_stealth ライブラリの内部調査"
-          echo "=================================================="
-          # ステップ3: 問題のライブラリのフォルダパスを特定し、その中身をリスト表示する
-          # これで stealth_sync が本当に存在しないのかがわかる
-          STEALTH_PATH=$(python -c "import playwright_stealth; print(playwright_stealth.__path__[0])")
-          echo "ライブラリのパス: $STEALTH_PATH"
-          ls -l "$STEALTH_PATH"
-          echo "=================================================="
 
       - name: スクレイピング実行
         env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }} # Secretを環境変数として渡す
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: python main.py
