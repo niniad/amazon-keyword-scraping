@@ -136,7 +136,9 @@ def main():
         page = context.new_page()
         
         # ★★★ ここを修正しました ★★★
+        # Stealthクラスをインスタンス化（オブジェクトを作成）
         stealth = Stealth()
+        # 作成したオブジェクトのメソッドを呼び出す
         stealth.apply_stealth_sync(page)
 
         for keyword, asins_to_find in keyword_to_asins.items():
@@ -144,15 +146,17 @@ def main():
             
             rank_results = get_amazon_rankings_for_keyword(page, keyword, asins_to_find)
 
+            # キーワードごとに結果をまとめて書き込む（API呼び出し回数を削減）
             rows_to_append = []
             for asin in asins_to_find:
+                # このキーワードの調査対象ASINのみを処理
                 if asin not in rank_results: continue
                 rank_data = rank_results[asin]
                 new_row = [
                     asin, keyword,
                     rank_data['organic_rank'], rank_data['sponsored_product_rank'],
                     rank_data['sponsored_brand_rank'], rank_data['sponsored_brand_video_rank'],
-                    '',
+                    '', # プレースホルダー
                     datetime.now().strftime('%Y/%m/%d %H:%M:%S')
                 ]
                 rows_to_append.append(new_row)
