@@ -1,0 +1,33 @@
+# .github/workflows/scrape.yml
+name: Amazon Rank Scraper
+
+on:
+  schedule:
+    - cron: '30 * * * *' # 毎時30分に実行 (例)
+  workflow_dispatch: # 手動でも実行できるようにする
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのコードをチェックアウト
+        uses: actions/checkout@v3
+
+      - name: Pythonのセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Playwrightのブラウザをインストール
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps
+
+      - name: Pythonライブラリのインストール
+        run: |
+          pip install gspread beautifulsoup4 pandas
+
+      - name: スクレイピング実行
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }} # Secretを環境変数として渡す
+        run: python main.py
