@@ -1,7 +1,7 @@
-# main.py (ステルス機能搭載・最終版)
+# main.py (import文を修正した最終版)
 import gspread
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_sync # ステルス機能をインポート
+from playwright_stealth.stealth import stealth_sync # ★★★ ここを修正しました ★★★
 from bs4 import BeautifulSoup
 from datetime import datetime
 import time
@@ -18,7 +18,7 @@ SPREADSHEET_KEY = '1NBYKIW94P14fBgTSwlHBwOfuh-S3EYhsLNnALuWFdbQ'
 SELECTORS = {
     'all_containers': '[data-component-type="s-search-result"], [data-component-type="sp-sponsored-brand"], [data-component-type="sponsored-brands-list"], [data-component-type="sponsored-brand-video-ad"]',
     'sponsored_product_label': 'span[data-component-type="s-sponsored-label"]',
-    'captcha_check': 'form[action="/errors/validateCaptcha"]' # CAPTCHAページの判定用
+    'captcha_check': 'form[action="/errors/validateCaptcha"]'
 }
 
 # --- 関数定義 ---
@@ -50,11 +50,10 @@ def get_amazon_rankings_for_keyword(page, keyword, target_asins_list):
                 page.goto(initial_url, wait_until='domcontentloaded', timeout=60000)
             else:
                 next_button = page.locator('a.s-pagination-item.s-pagination-next').first
-                if not next_button.is_visible():
+                if not next_button.is_visible(timeout=10000):
                     print("次のページへのリンクが見つかりません。調査を終了します。")
                     break
                 next_button.click()
-                # ページ遷移を待機
                 page.wait_for_load_state('domcontentloaded', timeout=30000)
         except PlaywrightTimeoutError:
             print(f"ページ {i} の読み込み/遷移がタイムアウトしました。")
@@ -63,10 +62,8 @@ def get_amazon_rankings_for_keyword(page, keyword, target_asins_list):
             print(f"ページ {i} への遷移中にエラーが発生: {e}")
             break
             
-        # CAPTCHA（ボット判定）ページに飛ばされていないか確認
-        if page.locator(SELECTORS['captcha_check']).is_visible():
+        if page.locator(SELECTORS['captcha_check']).count() > 0:
             print("CAPTCHAページを検出しました。このキーワードの調査を中止します。")
-            # 全てのASIN結果を「ブロックにより失敗」などに更新することも可能
             return results
 
         try:
@@ -74,16 +71,16 @@ def get_amazon_rankings_for_keyword(page, keyword, target_asins_list):
             print("検索結果コンテナを検出しました。")
         except PlaywrightTimeoutError:
             print(f"タイムアウト: {i}ページ目に検索結果が表示されませんでした。ボットとしてブロックされた可能性が高いです。")
-            # 失敗したページのHTMLをログに出力（ファイル保存の代わり）
-            print("--- 取得失敗時のHTML (先頭500文字) ---")
-            print(page.content()[:500])
-            print("------------------------------------")
-            break # このキーワードの調査はここで打ち切り
+            break
 
         html = page.content()
         soup = BeautifulSoup(html, 'html.parser')
         all_elements = soup.select(SELECTORS['all_containers'])
         
+        if not all_elements:
+            print(f"{i}ページで解析対象の要素が見つかりませんでした。")
+            continue
+
         print(f"ページ{i}で {len(all_elements)} 個の要素を発見。順位を解析します。")
 
         for element in all_elements:
@@ -113,11 +110,9 @@ def get_amazon_rankings_for_keyword(page, keyword, target_asins_list):
     
     return results
 
-# --- メイン処理 ---
 def main():
     gcp_sa_key_str = os.environ.get('GCP_SA_KEY')
     if not gcp_sa_key_str: raise ValueError("環境変数 GCP_SA_KEY が設定されていません。")
-    if not SPREADSHEET_KEY or SPREADSHEET_KEY == 'YOUR_SPREADSHEET_KEY': raise ValueError("環境変数 SPREADSHEET_KEY が設定されていません。")
 
     credentials = json.loads(gcp_sa_key_str)
     gc = gspread.service_account_from_dict(credentials)
@@ -140,7 +135,6 @@ def main():
         )
         page = context.new_page()
         
-        # ★★★ ステルス機能の適用 ★★★
         stealth_sync(page)
 
         for keyword, asins_to_find in keyword_to_asins.items():
@@ -149,19 +143,20 @@ def main():
             rank_results = get_amazon_rankings_for_keyword(page, keyword, asins_to_find)
 
             for asin in asins_to_find:
+                # keywordに紐づくASINだけを書き込むように修正
                 if asin not in rank_results: continue
                 rank_data = rank_results[asin]
                 new_row = [
                     asin, keyword,
                     rank_data['organic_rank'], rank_data['sponsored_product_rank'],
                     rank_data['sponsored_brand_rank'], rank_data['sponsored_brand_video_rank'],
-                    '',  # 「検索結果ページでの商品総数」列用のプレースホルダー
+                    '',
                     datetime.now().strftime('%Y/%m/%d %H:%M:%S')
                 ]
                 results_sheet.append_row(new_row, value_input_option='USER_ENTERED')
                 print(f"書き込み完了: {new_row}")
             
-            time.sleep(random.uniform(7, 12)) # サーバー負荷軽減のため、キーワード間の待機を少し長くする
+            time.sleep(random.uniform(7, 12))
 
         browser.close()
 
