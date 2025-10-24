@@ -1,4 +1,4 @@
-# .github/workflows/scrape.yml (ソースコード調査コマンドを追加した最終版)
+# .github/workflows/scrape.yml (クリーン版)
 name: Amazon Rank Scraper
 
 on:
@@ -23,22 +23,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir --upgrade gspread beautifulsoup4 pandas playwright playwright-stealth
           python -m playwright install --with-deps
-
-      # ★★★ ここに最終調査コードを追加しました ★★★
-      - name: ライブラリのソースコードを調査
-        run: |
-          echo "=================================================="
-          echo "     playwright_stealth ライブラリの内部調査"
-          echo "=================================================="
-          # 問題のライブラリのフォルダパスを特定
-          STEALTH_PATH=$(python -c "import playwright_stealth.stealth; print(playwright_stealth.stealth.__file__)")
-          echo "ライブラリのファイルパス: $STEALTH_PATH"
-          echo ""
-          echo "--- stealth.py のソースコード START ---"
-          # stealth.py の中身をすべて出力する
-          cat "$STEALTH_PATH"
-          echo "--- stealth.py のソースコード END ---"
-          echo "=================================================="
 
       - name: スクレイピング実行
         env:
