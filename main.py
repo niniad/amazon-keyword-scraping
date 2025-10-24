@@ -1,7 +1,7 @@
-# main.py (import文を修正した最終完成版)
+# main.py (ステルス機能の正しい呼び出し方に修正した最終完成版)
 import gspread
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_sync # ★★★ ここを修正しました ★★★
+from playwright_stealth import Stealth # ★★★ クラスをインポート ★★★
 from bs4 import BeautifulSoup
 from datetime import datetime
 import time
@@ -135,14 +135,15 @@ def main():
         )
         page = context.new_page()
         
-        stealth_sync(page)
+        # ★★★ ここを修正しました ★★★
+        stealth = Stealth()
+        stealth.apply_stealth_sync(page)
 
         for keyword, asins_to_find in keyword_to_asins.items():
             print(f"\n>>>>>> 調査開始: キーワード='{keyword}', 対象ASIN数={len(asins_to_find)} <<<<<<")
             
             rank_results = get_amazon_rankings_for_keyword(page, keyword, asins_to_find)
 
-            # キーワードごとに結果をまとめて書き込む
             rows_to_append = []
             for asin in asins_to_find:
                 if asin not in rank_results: continue
