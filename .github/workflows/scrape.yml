@@ -25,7 +25,7 @@ jobs:
 
       - name: Pythonライブラリのインストール
         run: |
-          pip install gspread beautifulsoup4 pandas
+          pip install gspread beautifulsoup4 pandas playwright-stealth
 
       - name: スクレイピング実行
         env:
