@@ -1,9 +1,9 @@
-# .github/workflows/scrape.yml
+# .github/workflows/scrape.yml (毎時0分実行に修正)
 name: Amazon Rank Scraper
 
 on:
   schedule:
-    - cron: '30 * * * *' # 毎時30分に実行 (例)
+    - cron: '0 * * * *' # 毎時0分に実行
   workflow_dispatch: # 手動でも実行できるようにする
 
 jobs:
