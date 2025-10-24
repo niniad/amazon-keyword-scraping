@@ -1,4 +1,4 @@
-# main.py (効率化対応版)
+# main.py (全広告対応・効率化・ランキングロジック改修版)
 import gspread
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
@@ -11,134 +11,181 @@ import json
 from collections import defaultdict
 
 # --- 設定項目 ---
-# 1. Googleスプレッドシートのキー (URLの .../d/【この部分】/edit...)
-SPREADSHEET_KEY = '1NBYKIW94P14fBgTSwlHBwOfuh-S3EYhsLNnALuWFdbQ' # ご自身のキーに書き換えてください
+# 実行環境の環境変数からスプレッドシートキーを取得するか、直接ここに記述してください
+SPREADSHEET_KEY = os.environ.get('SPREADSHEET_KEY', 'YOUR_SPREADSHEET_KEY')
 
-# 2. 各要素を特定するためのセレクタ
+# HTML解析に基づき更新されたCSSセレクタ
 SELECTORS = {
-    'item_container': '[data-component-type="s-search-result"]',
+    # 4種類の全要素をページ上の出現順に取得するための統合セレクタ
+    'all_containers': (
+        '[data-component-type="s-search-result"], '
+        '[data-component-type="sp-sponsored-brand"], '
+        '[data-component-type="sponsored-brands-list"], '
+        '[data-component-type="sponsored-brand-video-ad"]'
+    ),
+    # 各要素のタイプを識別するためのセレクタ
     'sponsored_product_label': 'span[data-component-type="s-sponsored-label"]',
+    # 各コンテナからASINを取得するための共通セレクタ
     'asin': '[data-asin]',
 }
 
 # --- 関数定義 ---
-
 def get_amazon_rankings_for_keyword(page, target_asins_list):
     """
-    ブラウザでページを開き、HTMLを解析して【複数の】ASINの順位を一度に返す
+    指定されたキーワードのAmazon検索結果を3ページまで解析し、
+    対象ASINの4種類のランキング（オーガニック、スポンサープロダクト、
+    スポンサーブランド、スポンサーブランド動画）を計測する。
     """
-    # 各ASINの結果を初期化
-    results = {asin: {'organic_rank': '3ページ以内になし', 'sponsored_product_rank': '3ページ以内になし'} for asin in target_asins_list}
+    results = {
+        asin: {
+            'organic_rank': '3ページ以内になし',
+            'sponsored_product_rank': '3ページ以内になし',
+            'sponsored_brand_rank': '3ページ以内になし',
+            'sponsored_brand_video_rank': '3ページ以内になし'
+        } for asin in target_asins_list
+    }
     
+    # ページをまたいでランキングを累積するためのカウンター
     organic_counter = 0
-    sponsored_counter = 0
+    sponsored_product_counter = 0
+    sponsored_brand_counter = 0
+    sponsored_brand_video_counter = 0
     
-    found_all_asins = False
-
+    # 検索結果を3ページまで追跡
     for i in range(1, 4):
-        # 2ページ目以降はURLを直接叩く
+        # 2ページ目以降はURLを更新して遷移
         if i > 1:
-            search_url = f"{page.url}&page={i}"
             try:
-                page.goto(search_url, wait_until='networkidle', timeout=60000)
+                current_url = page.url
+                if '&page=' in current_url:
+                    base_url = current_url.split('&page=')[0]
+                else:
+                    base_url = current_url
+                next_page_url = f"{base_url}&page={i}"
+                page.goto(next_page_url, wait_until='networkidle', timeout=60000)
             except Exception as e:
-                print(f"ページの読み込みに失敗しました: {e}")
+                print(f"ページ{i}の読み込みに失敗: {e}")
                 break
 
         print(f"{i}ページ目の解析を開始...")
         html = page.content()
         soup = BeautifulSoup(html, 'html.parser')
         
-        items = soup.select(SELECTORS['item_container'])
-        if not items:
-            print("商品リストが見つかりません。ページの構造が変わったか、ブロックされた可能性があります。")
-            break
-            
-        for item in items:
-            asin_elem = item.select_one(SELECTORS['asin'])
-            current_asin = asin_elem['data-asin'] if asin_elem and 'data-asin' in asin_elem.attrs else None
-
-            # 調査対象のASINリストに含まれているかチェック
-            if not current_asin or current_asin not in target_asins_list:
-                continue
-
-            is_sponsored = item.select_one(SELECTORS['sponsored_product_label']) is not None
-            
-            # 各カウンターは商品が現れるたびにインクリメント
-            if is_sponsored:
-                sponsored_counter += 1
-                # まだ順位が記録されていない場合のみ記録する（最初の出現順位を優先）
-                if results[current_asin]['sponsored_product_rank'] == '3ページ以内になし':
-                    results[current_asin]['sponsored_product_rank'] = sponsored_counter
-            else:
-                organic_counter += 1
-                if results[current_asin]['organic_rank'] == '3ページ以内になし':
-                    results[current_asin]['organic_rank'] = organic_counter
+        # --- 新しいランキング計測ロジック ---
+        # ページ上の全要素（商品、広告）を出現順に取得
+        all_elements = soup.select(SELECTORS['all_containers'])
         
-        # 全てのASINのオーガニックと広告順位が見つかったかチェック
-        if all(res['organic_rank'] != '3ページ以内になし' and res['sponsored_product_rank'] != '3ページ以内になし' for res in results.values()):
-            print("全ての対象ASINの順位が見つかったため、このキーワードの調査を終了します。")
-            found_all_asins = True
-            break
-        
-        time.sleep(random.uniform(2, 4)) # ページ遷移の間にランダムな待機
-    
-    if found_all_asins:
-        return results
+        # 取得した全要素を単一のループで処理し、種類を判定してランキングを計測
+        for element in all_elements:
+            component_type = element.get('data-component-type', '')
+
+            # 1. スポンサーブランド動画広告の判定
+            if component_type == 'sponsored-brand-video-ad':
+                sponsored_brand_video_counter += 1
+                asins_in_ad = [el.get('data-asin') for el in element.select(SELECTORS['asin']) if el.get('data-asin')]
+                for asin in asins_in_ad:
+                    if asin in target_asins_list and results[asin]['sponsored_brand_video_rank'] == '3ページ以内になし':
+                        results[asin]['sponsored_brand_video_rank'] = sponsored_brand_video_counter
+
+            # 2. スポンサーブランド広告の判定
+            elif component_type in ['sp-sponsored-brand', 'sponsored-brands-list']:
+                sponsored_brand_counter += 1
+                asins_in_ad = [el.get('data-asin') for el in element.select(SELECTORS['asin']) if el.get('data-asin')]
+                for asin in asins_in_ad:
+                    if asin in target_asins_list and results[asin]['sponsored_brand_rank'] == '3ページ以内になし':
+                        results[asin]['sponsored_brand_rank'] = sponsored_brand_counter
+
+            # 3. オーガニック商品とスポンサープロダクト広告の判定
+            elif component_type == 's-search-result':
+                asin_element = element.select_one(SELECTORS['asin'])
+                current_asin = asin_element['data-asin'] if asin_element and 'data-asin' in asin_element.attrs else None
+                if not current_asin:
+                    continue
+
+                # スポンサーラベルの有無で判定
+                is_sponsored_product = element.select_one(SELECTORS['sponsored_product_label']) is not None
+                
+                if is_sponsored_product:
+                    sponsored_product_counter += 1
+                    if current_asin in target_asins_list and results[current_asin]['sponsored_product_rank'] == '3ページ以内になし':
+                        results[current_asin]['sponsored_product_rank'] = sponsored_product_counter
+                else:
+                    organic_counter += 1
+                    if current_asin in target_asins_list and results[current_asin]['organic_rank'] == '3ページ以内になし':
+                        results[current_asin]['organic_rank'] = organic_counter
+
+        # サーバー負荷軽減のための待機
+        time.sleep(random.uniform(2, 4))
         
     return results
 
 # --- メイン処理 ---
 def main():
+    # GitHub ActionsのSecretsから認証情報を読み込む
     gcp_sa_key_str = os.environ.get('GCP_SA_KEY')
     if not gcp_sa_key_str:
         raise ValueError("環境変数 GCP_SA_KEY が設定されていません。")
-    
-    credentials = json.loads(gcp_sa_key_str)
-    gc = gspread.service_account_from_dict(credentials)
-    
+    if not SPREADSHEET_KEY or SPREADSHEET_KEY == 'YOUR_SPREADSHEET_KEY':
+        raise ValueError("環境変数 SPREADSHEET_KEY が設定されていません。")
+
+    try:
+        credentials = json.loads(gcp_sa_key_str)
+        gc = gspread.service_account_from_dict(credentials)
+    except Exception as e:
+        print(f"gspreadの認証に失敗しました: {e}")
+        return
+
     spreadsheet = gc.open_by_key(SPREADSHEET_KEY)
     settings_sheet = spreadsheet.worksheet("設定")
     results_sheet = spreadsheet.worksheet("結果")
     
     search_list = settings_sheet.get_all_records()
 
-    # ★★★ 変更点：キーワードごとにASINをグループ化する ★★★
+    # キーワードごとに対象ASINをまとめる
     keyword_to_asins = defaultdict(list)
     for row in search_list:
         if row.get('ASIN') and row.get('キーワード'):
             keyword_to_asins[row['キーワード']].append(str(row['ASIN']))
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        )
+        page = context.new_page()
 
-        # グループ化されたキーワードごとにループ処理
         for keyword, asins_to_find in keyword_to_asins.items():
             print(f"--- 調査開始: キーワード='{keyword}', 対象ASIN数={len(asins_to_find)} ---")
             
-            initial_url = f"https://www.amazon.co.jp/s?k={keyword}"
+            initial_url = f"https://www.amazon.co.jp/s?k={keyword.replace(' ', '+')}"
             try:
-                page.goto(initial_url, wait_until='networkidle', timeout=60000)
+                page.goto(initial_url, wait_until='networkidle', timeout=90000)
+                # 検索結果がない、またはロボット判定された場合の対策
+                if "見つかりませんでした" in page.content() or "申し訳ありません" in page.content():
+                    print(f"キーワード '{keyword}' の検索結果が見つからないか、アクセスがブロックされた可能性があります。スキップします。")
+                    continue
             except Exception as e:
-                print(f"初期ページの読み込みに失敗しました: {e}")
-                continue # 次のキーワードへ
+                print(f"初期ページの読み込みに失敗: {e}")
+                continue
             
-            # 1回のブラウジングで、関連する全ASINの順位を取得
+            # ランキング取得処理の実行
             rank_results = get_amazon_rankings_for_keyword(page, asins_to_find)
 
-            # 取得した結果をASINごとにスプレッドシートに書き込み
+            # 結果をスプレッドシートに書き込み
             for asin, rank_data in rank_results.items():
                 new_row = [
                     asin,
                     keyword,
                     rank_data['organic_rank'],
                     rank_data['sponsored_product_rank'],
+                    rank_data['sponsored_brand_rank'],
+                    rank_data['sponsored_brand_video_rank'],
                     datetime.now().strftime('%Y/%m/%d %H:%M')
                 ]
-                results_sheet.append_row(new_row)
+                results_sheet.append_row(new_row, value_input_option='USER_ENTERED')
                 print(f"結果を書き込みました: {new_row}")
             
+            # 次のキーワードへのアクセス間隔
             time.sleep(random.uniform(5, 10))
 
         browser.close()
